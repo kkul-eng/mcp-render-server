@@ -32,6 +32,42 @@ def read_file(path: str) -> str:
     except Exception as e:
         return f"Dosya okuma hatası: {str(e)}"
 
+@mcp.tool()
+def document_qa(question: str, doc_name: str = "izahname.txt") -> str:
+    """İzahnamede soru yanıtlar"""
+    try:
+        # Dokümanı oku
+        doc_path = os.path.join("documents", doc_name)
+        with open(doc_path, "r", encoding="utf-8") as f:
+            document = f.read()
+        
+        # Dokümanı paragraflara böl
+        paragraphs = document.split('\n\n')
+        
+        # Soru kelimelerini tespit et (stopwords hariç)
+        question_words = [w.lower() for w in question.split() if len(w) > 3]
+        
+        # En alakalı paragrafları bul
+        relevant_paragraphs = []
+        for p in paragraphs:
+            score = sum(1 for word in question_words if word.lower() in p.lower())
+            if score > 0:
+                relevant_paragraphs.append((score, p))
+        
+        # Skorlarına göre sırala
+        relevant_paragraphs.sort(reverse=True)
+        
+        if relevant_paragraphs:
+            # En alakalı 2 paragrafı döndür
+            result = "\n\n".join([p for _, p in relevant_paragraphs[:2]])
+            return result
+        else:
+            return "Üzgünüm, izahnamede bu soruya yanıt bulunamadı."
+    except FileNotFoundError:
+        return f"Doküman bulunamadı: {doc_name}"
+    except Exception as e:
+        return f"QA hatası: {str(e)}"
+
 @app.get("/")
 async def root():
     return {"message": "MCP Server çalışıyor", "info": "POST /mcp ile istek yapabilirsiniz"}
@@ -52,9 +88,10 @@ async def run_mcp(query: dict = Body(...)):
         print(f"Çalıştırılıyor: tool={tool_name}, args={args}")
         
         # Doğru metodu kullanarak aracı çalıştır
-        # NOT: 'run_tool' yerine doğrudan tool ismiyle çağırıyoruz
         if tool_name == "read_file":
             result = read_file(**args)
+        elif tool_name == "document_qa":
+            result = document_qa(**args)
         else:
             raise ValueError(f"Bilinmeyen araç: {tool_name}")
         
