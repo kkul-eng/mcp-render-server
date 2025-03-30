@@ -36,8 +36,14 @@ def read_file(path: str) -> str:
 def document_qa(question: str, doc_name: str = "izahname.txt") -> str:
     """İzahnamede soru yanıtlar"""
     try:
-        # Dokümanı oku
-        doc_path = os.path.join("documents", doc_name)
+        # Debug için çalışma dizinini ve mevcut dosyaları yazdır
+        print(f"Çalışma dizini: {os.getcwd()}")
+        print(f"Aranan dosya: {doc_name}")
+        print(f"Mevcut dosyalar: {os.listdir('.')}")
+        
+        # Dokümanı doğrudan kök dizinden oku
+        doc_path = doc_name
+        
         with open(doc_path, "r", encoding="utf-8") as f:
             document = f.read()
         
