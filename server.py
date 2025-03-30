@@ -12,15 +12,27 @@ def read_file(path: str) -> str:
             return f.read()
     except FileNotFoundError:
         return "Dosya bulunamadı"
+    except Exception as e:
+        return f"Hata: {str(e)}"
 
 @app.post("/mcp")
 async def run_mcp(query: dict):
-    tool_name = query.get("tool", "read_file")
-    args = query.get("args", {"path": "sample.txt"})
-    result = mcp.run_tool(tool_name, **args)
-    return {"result": result}
+    try:
+        tool_name = query.get("tool", "read_file")
+        args = query.get("args", {"path": "sample.txt"})
+        
+        if tool_name == "read_file":
+            result = read_file(**args)
+        else:
+            result = "Bilinmeyen tool çağrıldı."
+        
+        return {"result": result}
+    except Exception as e:
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
     uvicorn.run(app, host="0.0.0.0", port=8000)
