@@ -1,13 +1,27 @@
-import os
-import uvicorn
+from mcp.server.fastmcp import FastMCP
 from fastapi import FastAPI
+import os
 
 app = FastAPI()
+mcp = FastMCP("filesystem")
 
-@app.get("/")
-async def root():
-    return {"message": "FastAPI uygulaması başarıyla çalışıyor!"}
+@mcp.tool()
+def read_file(path: str) -> str:
+    """Belirtilen yoldaki dosyayı okur"""
+    try:
+        with open(path, "r") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "Dosya bulunamadı"
+
+@app.post("/mcp")
+async def run_mcp(query: dict):
+Xpaths    tool_name = query.get("tool", "read_file")
+    args = query.get("args", {"path": "sample.txt"})
+    result = mcp.run_tool(tool_name, **args)
+    return {"result": result}
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))  # Varsayılan portu 10000 olarak ayarla
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))  # Render'ın PORT değişkenini kullan
     uvicorn.run(app, host="0.0.0.0", port=port)
