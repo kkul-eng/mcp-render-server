@@ -16,7 +16,7 @@ def read_file(path: str) -> str:
 
 @app.post("/mcp")
 async def run_mcp(query: dict):
-Xpaths    tool_name = query.get("tool", "read_file")
+    tool_name = query.get("tool", "read_file")
     args = query.get("args", {"path": "sample.txt"})
     result = mcp.run_tool(tool_name, **args)
     return {"result": result}
