@@ -1,12 +1,9 @@
 from mcp.server.fastmcp import FastMCP
 from fastapi import FastAPI
-from sse_starlette.sse import EventSourceResponse
-import asyncio
 
 app = FastAPI()
 mcp = FastMCP("filesystem")
 
-# Örnek bir MCP aracı
 @mcp.tool()
 def read_file(path: str) -> str:
     """Belirtilen yoldaki dosyayı okur"""
@@ -16,16 +13,12 @@ def read_file(path: str) -> str:
     except FileNotFoundError:
         return "Dosya bulunamadı"
 
-# SSE endpoint'i oluşturma
-@app.get("/events")
-async def sse_endpoint():
-    async def event_generator():
-        # MCP sunucusundan veri akışını simüle ediyoruz
-        while True:
-            yield {"event": "message", "data": "MCP sunucusu çalışıyor"}
-            await asyncio.sleep(1)
-
-    return EventSourceResponse(event_generator())
+@app.post("/mcp")
+async def run_mcp(query: dict):
+    tool_name = query.get("tool", "read_file")
+    args = query.get("args", {"path": "sample.txt"})
+    result = mcp.run_tool(tool_name, **args)
+    return {"result": result}
 
 if __name__ == "__main__":
     import uvicorn
