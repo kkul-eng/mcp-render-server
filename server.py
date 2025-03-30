@@ -12,10 +12,10 @@ app = FastAPI(title="MCP Server API",
 # CORS ayarlarını ekle
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Tüm kaynaklar için erişime izin ver
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Tüm HTTP metotlarına izin ver
-    allow_headers=["*"],  # Tüm başlıklara izin ver
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # MCP nesnesini oluştur
@@ -32,25 +32,14 @@ def read_file(path: str) -> str:
     except Exception as e:
         return f"Dosya okuma hatası: {str(e)}"
 
-@app.get("/health")
-async def health_check():
-    """Sunucu sağlık kontrolü"""
-    return {"status": "ok", "service": "mcp-server"}
+@app.get("/")
+async def root():
+    return {"message": "MCP Server çalışıyor", "info": "POST /mcp ile istek yapabilirsiniz"}
 
 @app.post("/mcp")
 async def run_mcp(query: dict = Body(...)):
     """
     MCP aracını çalıştır
-    
-    Örnek istek body:
-    ```json
-    {
-        "tool": "read_file",
-        "args": {
-            "path": "sample.txt"
-        }
-    }
-    ```
     """
     try:
         # Debug için gelen isteği logla
@@ -62,8 +51,12 @@ async def run_mcp(query: dict = Body(...)):
         # Araç çalıştırma işlemini logla
         print(f"Çalıştırılıyor: tool={tool_name}, args={args}")
         
-        # Aracı çalıştır
-        result = mcp.run_tool(tool_name, **args)
+        # Doğru metodu kullanarak aracı çalıştır
+        # NOT: 'run_tool' yerine doğrudan tool ismiyle çağırıyoruz
+        if tool_name == "read_file":
+            result = read_file(**args)
+        else:
+            raise ValueError(f"Bilinmeyen araç: {tool_name}")
         
         # Sonucu döndür
         return {"result": result}
@@ -75,11 +68,6 @@ async def run_mcp(query: dict = Body(...)):
         
         # Hata yanıtı döndür
         raise HTTPException(status_code=500, detail=f"MCP Hatası: {error_msg}")
-
-# Test için basit bir endpoint
-@app.get("/")
-async def root():
-    return {"message": "MCP Server çalışıyor", "info": "POST /mcp ile istek yapabilirsiniz"}
 
 # Uygulama başlat
 if __name__ == "__main__":
