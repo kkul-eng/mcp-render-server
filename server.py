@@ -6,7 +6,18 @@ import os
 import traceback
 import re
 import string
+import json
+import requests
 from collections import Counter
+from dotenv import load_dotenv
+
+# .env dosyasını yükle (eğer varsa)
+load_dotenv()
+
+# API anahtarını çevresel değişkenlerden veya doğrudan kod içinden al
+API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyD4XHl_tmjeLX4SlENsngRy9auqNGpTuXk")
+API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={API_KEY}"
+HEADERS = {"Content-Type": "application/json"}
 
 # FastAPI uygulamasını başlat
 app = FastAPI(title="MCP Server API", 
@@ -224,6 +235,91 @@ def bolumleri_puanla(bölümler, soru):
     
     return puanlı_bölümler
 
+def api_ile_soru_sor(soru, metinler):
+    """API'ye soruyu ve ilgili metinleri gönderir."""
+    try:
+        ilgili_icerik = "\n\n".join([f"Bölüm {i+1}:\n{metin}" for i, metin in enumerate(metinler)])
+        istem = (
+            f"Aşağıdaki metinlerden '{soru}' sorusunun cevabını bul:\n\n"
+            f"{ilgili_icerik}\n\n"
+            "Yanıtı kısa ve net şekilde, 2-3 cümle içinde ver. "
+            "Eğer soruda geçen terimler veya kavramlar metinde tam olarak tanımlanmamışsa "
+            "bile benzer ve ilgili bilgileri kullanarak yanıt oluştur. "
+            "Eğer hiçbir ilgili bilgi yoksa 'Dokümanda bu bilgi bulunamadı.' yaz."
+        )
+        
+        veri = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": istem}
+                    ]
+                }
+            ]
+        }
+        
+        yanit = requests.post(API_URL, headers=HEADERS, data=json.dumps(veri))
+        yanit.raise_for_status()
+        sonuc = yanit.json()
+        cevap = sonuc.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "API yanıt vermedi.")
+        return cevap.strip()
+    except Exception as e:
+        print(f"API hatası: {str(e)}")
+        # API'de sorun olursa yerel algoritma sonuçlarını kullan
+        return None
+
+def yerel_yanit_olustur(puanlı_bölümler, soru):
+    """En iyi bölümlerden soru için en uygun yanıtı oluşturur."""
+    if not puanlı_bölümler:
+        return "Dokümanda bu bilgi bulunamadı."
+    
+    # En yüksek puanlı bölümü al
+    en_iyi_bölüm = puanlı_bölümler[0][1]
+    
+    # Bölüm uzunluğuna bak
+    if len(en_iyi_bölüm.split()) < 150:
+        # Kısa bölüm, olduğu gibi döndür
+        return en_iyi_bölüm
+    
+    # Uzun bölüm, cümlelere ayır ve en iyilerini seç
+    cümleler = cümlelere_böl(en_iyi_bölüm)
+    puanlı_cümleler = cümleleri_puanla(cümleler, soru)
+    
+    # İlk 5 en iyi cümleyi orijinal sırasında birleştir
+    en_iyi_cümleler = [pc[1] for pc in puanlı_cümleler[:5]]
+    
+    # Eğer tek bir cümle bulunabildiyse ve yetersizse, ikinci en iyi bölümü de kontrol et
+    if len(en_iyi_cümleler) <= 1 and len(puanlı_bölümler) > 1:
+        ikinci_bölüm = puanlı_bölümler[1][1]
+        ikinci_cümleler = cümlelere_böl(ikinci_bölüm)
+        ikinci_puanlı_cümleler = cümleleri_puanla(ikinci_cümleler, soru)
+        
+        # İkinci bölümden en iyi 2 cümleyi ekle
+        ikinci_en_iyi = [pc[1] for pc in ikinci_puanlı_cümleler[:2]]
+        en_iyi_cümleler.extend(ikinci_en_iyi)
+    
+    # Cümleleri orijinal sırada düzenle
+    tüm_cümleler = []
+    for bölüm in [puanlı_bölümler[0][1]] + ([puanlı_bölümler[1][1]] if len(puanlı_bölümler) > 1 else []):
+        cümleler = cümlelere_böl(bölüm)
+        for cümle in cümleler:
+            if cümle in en_iyi_cümleler and cümle not in tüm_cümleler:
+                tüm_cümleler.append(cümle)
+    
+    # Eğer hiç cümle bulunamadıysa, en iyi bölümü kısalt
+    if not tüm_cümleler:
+        cümleler = cümlelere_böl(en_iyi_bölüm)
+        tüm_cümleler = cümleler[:3]  # İlk 3 cümleyi al
+    
+    # Cevabı düzenle
+    yanıt = " ".join(tüm_cümleler)
+    
+    # Fazla uzunsa kısalt
+    if len(yanıt) > 1000:
+        yanıt = yanıt[:997] + "..."
+    
+    return yanıt
+
 def cümlelere_böl(metin):
     """Metni cümlelere ayırır - Türkçe için iyileştirilmiş."""
     # Kısaltmaları tanı
@@ -284,58 +380,6 @@ def cümleleri_puanla(cümleler, soru):
     
     return puanlı_cümleler
 
-def en_iyi_sonucu_olustur(puanlı_bölümler, soru):
-    """En iyi bölümlerden soru için en uygun yanıtı oluşturur."""
-    if not puanlı_bölümler:
-        return "Dokümanda bu bilgi bulunamadı."
-    
-    # En yüksek puanlı bölümü al
-    en_iyi_bölüm = puanlı_bölümler[0][1]
-    
-    # Bölüm uzunluğuna bak
-    if len(en_iyi_bölüm.split()) < 150:
-        # Kısa bölüm, olduğu gibi döndür
-        return en_iyi_bölüm
-    
-    # Uzun bölüm, cümlelere ayır ve en iyilerini seç
-    cümleler = cümlelere_böl(en_iyi_bölüm)
-    puanlı_cümleler = cümleleri_puanla(cümleler, soru)
-    
-    # İlk 5 en iyi cümleyi orijinal sırasında birleştir
-    en_iyi_cümleler = [pc[1] for pc in puanlı_cümleler[:5]]
-    
-    # Eğer tek bir cümle bulunabildiyse ve yetersizse, ikinci en iyi bölümü de kontrol et
-    if len(en_iyi_cümleler) <= 1 and len(puanlı_bölümler) > 1:
-        ikinci_bölüm = puanlı_bölümler[1][1]
-        ikinci_cümleler = cümlelere_böl(ikinci_bölüm)
-        ikinci_puanlı_cümleler = cümleleri_puanla(ikinci_cümleler, soru)
-        
-        # İkinci bölümden en iyi 2 cümleyi ekle
-        ikinci_en_iyi = [pc[1] for pc in ikinci_puanlı_cümleler[:2]]
-        en_iyi_cümleler.extend(ikinci_en_iyi)
-    
-    # Cümleleri orijinal sırada düzenle
-    tüm_cümleler = []
-    for bölüm in [puanlı_bölümler[0][1]] + ([puanlı_bölümler[1][1]] if len(puanlı_bölümler) > 1 else []):
-        cümleler = cümlelere_böl(bölüm)
-        for cümle in cümleler:
-            if cümle in en_iyi_cümleler and cümle not in tüm_cümleler:
-                tüm_cümleler.append(cümle)
-    
-    # Eğer hiç cümle bulunamadıysa, en iyi bölümü kısalt
-    if not tüm_cümleler:
-        cümleler = cümlelere_böl(en_iyi_bölüm)
-        tüm_cümleler = cümleler[:3]  # İlk 3 cümleyi al
-    
-    # Cevabı düzenle
-    yanıt = " ".join(tüm_cümleler)
-    
-    # Fazla uzunsa kısalt
-    if len(yanıt) > 1000:
-        yanıt = yanıt[:997] + "..."
-    
-    return yanıt
-
 @mcp.tool()
 def read_file(path: str) -> str:
     """Belirtilen yoldaki dosyayı okur"""
@@ -348,8 +392,8 @@ def read_file(path: str) -> str:
         return f"Dosya okuma hatası: {str(e)}"
 
 @mcp.tool()
-def document_qa(question: str, doc_name: str = "izahname.txt") -> str:
-    """İzahnamede soru yanıtlar - Gelişmiş algoritma ile"""
+def document_qa(question: str, doc_name: str = "izahname.txt", use_api: bool = True) -> str:
+    """İzahnamede soru yanıtlar - API ve yerel algoritma destekli"""
     try:
         # Debug için çalışma dizinini ve mevcut dosyaları yazdır
         print(f"Çalışma dizini: {os.getcwd()}")
@@ -381,10 +425,31 @@ def document_qa(question: str, doc_name: str = "izahname.txt") -> str:
         # Bölümleri puanla
         puanlı_bölümler = bolumleri_puanla(bölümler, genisletilmis_soru)
         
-        # En iyi yanıtı oluştur
-        sonuc = en_iyi_sonucu_olustur(puanlı_bölümler, genisletilmis_soru)
+        if not puanlı_bölümler:
+            return "Dokümanda bu bilgi bulunamadı."
         
-        return sonuc
+        # En iyi bölümleri al
+        en_iyi_metinler = [b[1] for b in puanlı_bölümler[:3]]
+        
+        # API kullanım seçeneği
+        if use_api:
+            try:
+                # API ile yanıt oluştur
+                api_yanıt = api_ile_soru_sor(question, en_iyi_metinler)
+                
+                # API yanıt verdiyse onu kullan
+                if api_yanıt:
+                    return api_yanıt
+                # API yanıt vermediyse yerel algoritmaya düş
+                else:
+                    print("API yanıt vermedi, yerel algoritma kullanılıyor...")
+                    return yerel_yanit_olustur(puanlı_bölümler, genisletilmis_soru)
+            except Exception as e:
+                print(f"API hatası: {str(e)}, yerel algoritma kullanılıyor...")
+                return yerel_yanit_olustur(puanlı_bölümler, genisletilmis_soru)
+        else:
+            # API kullanılmıyorsa doğrudan yerel algoritmayı kullan
+            return yerel_yanit_olustur(puanlı_bölümler, genisletilmis_soru)
     except FileNotFoundError:
         return f"Doküman bulunamadı: {doc_name}"
     except Exception as e:
@@ -416,7 +481,11 @@ async def run_mcp(query: dict = Body(...)):
         if tool_name == "read_file":
             result = read_file(**args)
         elif tool_name == "document_qa":
-            result = document_qa(**args)
+            # API kullanım parametresini kontrol et
+            use_api = args.get("use_api", True)
+            if "use_api" in args:
+                del args["use_api"]  # args'dan use_api'yi çıkar (document_qa'da kullanabilmek için)
+            result = document_qa(**args, use_api=use_api)
         else:
             raise ValueError(f"Bilinmeyen araç: {tool_name}")
         
