@@ -1,5 +1,7 @@
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from mcp.server.fastmcp import FastMCP
 import os
 import traceback
@@ -151,7 +153,8 @@ def document_qa(question: str, doc_name: str = "izahname.txt") -> str:
 
 @app.get("/")
 async def root():
-    return {"message": "MCP Server çalışıyor", "info": "POST /mcp ile istek yapabilirsiniz"}
+    # Ana sayfa için index.html dosyasını döndür
+    return FileResponse("index.html")
 
 @app.post("/mcp")
 async def run_mcp(query: dict = Body(...)):
