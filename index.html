@@ -40,6 +40,51 @@
             font-size: 16px;
             box-sizing: border-box;
         }
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .toggle {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+            margin-right: 10px;
+        }
+        .toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: #4a6fa5;
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
         button {
             background-color: #4a6fa5;
             color: white;
@@ -87,6 +132,11 @@
             margin-top: 8px;
             display: none;
         }
+        .source-info {
+            margin-top: 10px;
+            color: #666;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -102,27 +152,38 @@
             <label for="document">Doküman Adı:</label>
             <input type="text" id="document" value="izahname.txt">
         </div>
+        <div class="toggle-container">
+            <label class="toggle">
+                <input type="checkbox" id="use-api" checked>
+                <span class="toggle-slider"></span>
+            </label>
+            <span>Yapay Zeka API Kullan</span>
+        </div>
         <button id="submit-btn">Yanıtla</button>
     </div>
     
     <div class="loading" id="loading">
         <div class="spinner"></div>
-        <p>Yanıt aranıyor...</p>
+        <p id="loading-text">Yanıt aranıyor...</p>
     </div>
     
     <div class="answer-container" id="answer-container">
         <h2>Cevap:</h2>
         <div class="answer-content" id="answer-content"></div>
+        <div class="source-info" id="source-info"></div>
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const questionInput = document.getElementById('question');
             const documentInput = document.getElementById('document');
+            const useApiToggle = document.getElementById('use-api');
             const submitBtn = document.getElementById('submit-btn');
             const answerContainer = document.getElementById('answer-container');
             const answerContent = document.getElementById('answer-content');
+            const sourceInfo = document.getElementById('source-info');
             const loading = document.getElementById('loading');
+            const loadingText = document.getElementById('loading-text');
             const errorMessage = document.getElementById('error-message');
             
             // API URL - Sunucu adresinize göre değiştirin
@@ -139,6 +200,12 @@
                 answerContainer.style.display = 'none';
                 loading.style.display = 'block';
                 
+                if (useApiToggle.checked) {
+                    loadingText.textContent = "Yapay Zeka API ile yanıt aranıyor...";
+                } else {
+                    loadingText.textContent = "Yerel algoritma ile yanıt aranıyor...";
+                }
+                
                 try {
                     const response = await fetch(apiUrl, {
                         method: 'POST',
@@ -149,7 +216,8 @@
                             tool: 'document_qa',
                             args: {
                                 question: questionInput.value.trim(),
-                                doc_name: documentInput.value.trim()
+                                doc_name: documentInput.value.trim(),
+                                use_api: useApiToggle.checked
                             }
                         })
                     });
@@ -158,12 +226,16 @@
                     
                     if (response.ok) {
                         answerContent.textContent = data.result;
+                        sourceInfo.textContent = useApiToggle.checked ? 
+                            "Yanıt Kaynağı: Google Gemini API" : 
+                            "Yanıt Kaynağı: Yerel Algoritma";
                         answerContainer.style.display = 'block';
                     } else {
                         throw new Error(data.detail || 'API isteği başarısız oldu');
                     }
                 } catch (error) {
                     answerContent.textContent = `Hata oluştu: ${error.message}`;
+                    sourceInfo.textContent = "";
                     answerContainer.style.display = 'block';
                 } finally {
                     loading.style.display = 'none';
