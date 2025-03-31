@@ -82,7 +82,7 @@ def split_into_sections(text):
         is_heading = (
             (len(first_line) < 100 and first_line.isupper()) or  # Tamamen büyük harf
             (len(first_line) < 100 and first_line.endswith(':')) or  # ":" ile biten
-            (len(first_line) < 100 and all(w[0].isupper() for w in first_line.split() if w)) or  # Her kelime büyük harfle başlıyor
+            (len(first_line) < 100 and all(w[0].isupper() for w in first_line.split() if w and w[0].isalpha())) or  # Her kelime büyük harfle başlıyor
             (len(first_line) < 50 and len(lines) == 1)  # Kısa tek satır
         )
         
@@ -323,6 +323,10 @@ def document_qa(question: str, doc_name: str = "izahname.txt") -> str:
                 matched_kws = set(sentence_keywords) & set(question_keywords)
                 coverage = len(matched_kws) / len(set(question_keywords)) if question_keywords else 0
                 score += coverage * 30
+                
+                # Cümle uzunluğuna göre puanlama - çok kısa cümleleri cezalandır
+                if len(sentence.split()) < 5:
+                    score *= 0.5
                 
                 if score > 0:
                     scored_sentences.append((score, sentence))
