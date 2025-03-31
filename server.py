@@ -1,10 +1,11 @@
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from mcp.server.fastmcp import FastMCP
 import os
 import traceback
+import re
+from collections import Counter
 
 # FastAPI uygulamasını başlat
 app = FastAPI(title="MCP Server API", 
@@ -23,21 +24,45 @@ app.add_middleware(
 # MCP nesnesini oluştur
 mcp = FastMCP("filesystem")
 
-# Metinler arasındaki benzerlik oranını hesapla
-def similarity_ratio(text1, text2):
-    """İki metin arasındaki basit benzerlik oranını hesaplar"""
-    # Metinleri küçük harfe çevir ve kelime listesi yap
-    words1 = set(text1.lower().split())
-    words2 = set(text2.lower().split())
+# Metinler arasındaki benzerlik oranını gelişmiş hesaplama
+def improved_similarity(text1, text2):
+    """İki metin arasındaki geliştirilmiş benzerlik hesaplama"""
+    # Metinleri temizle ve küçük harfe çevir
+    def clean_text(text):
+        # Özel karakterleri kaldır ve küçük harfe çevir
+        text = text.lower()
+        text = re.sub(r'[^\w\s]', '', text)
+        return text
     
-    # Kesişim ve birleşim büyüklüğünü hesapla
-    intersection = len(words1.intersection(words2))
-    union = len(words1.union(words2))
+    clean_text1 = clean_text(text1)
+    clean_text2 = clean_text(text2)
     
-    # Jaccard benzerlik katsayısı
-    if union == 0:
+    # Her iki metindeki kelime frekanslarını hesapla
+    words1 = Counter(clean_text1.split())
+    words2 = Counter(clean_text2.split())
+    
+    # Ortak kelimeleri bul
+    common_words = set(words1.keys()) & set(words2.keys())
+    
+    # Ortak kelime yoksa benzerlik 0
+    if not common_words:
         return 0
-    return intersection / union
+    
+    # Ortak kelimelerin frekanslarını kullanarak benzerlik puanı hesapla
+    common_score = sum(min(words1[word], words2[word]) for word in common_words)
+    total_words = sum(words1.values()) + sum(words2.values())
+    
+    # Benzerlik oranı
+    return 2 * common_score / total_words if total_words > 0 else 0
+
+# Cümlelere ayırma fonksiyonu
+def split_into_sentences(text):
+    """Metni cümlelere ayırır"""
+    # Temel cümle ayırıcıları: nokta, soru işareti, ünlem işareti
+    # Türkçe için özel ayarlamalar
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    # Boş cümleleri filtrele
+    return [s.strip() for s in sentences if s.strip()]
 
 @mcp.tool()
 def read_file(path: str) -> str:
@@ -52,7 +77,7 @@ def read_file(path: str) -> str:
 
 @mcp.tool()
 def document_qa(question: str, doc_name: str = "izahname.txt") -> str:
-    """İzahnamede soru yanıtlar"""
+    """İzahnamede soru yanıtlar - Geliştirilmiş bağlam anlayışı ile"""
     try:
         # Debug için çalışma dizinini ve mevcut dosyaları yazdır
         print(f"Çalışma dizini: {os.getcwd()}")
@@ -65,90 +90,178 @@ def document_qa(question: str, doc_name: str = "izahname.txt") -> str:
         with open(doc_path, "r", encoding="utf-8") as f:
             document = f.read()
         
-        # Dokümanı bölümlere ayır
-        sections = document.split('\n\n')
-        
-        # Soru kelimelerini hazırla
-        # Stop kelimeleri çıkar (Türkçe için genel stop kelimeler)
+        # Türkçe stop kelimeleri
         stop_words = {"ve", "veya", "ile", "bu", "şu", "o", "bir", "için", "mi", "ne", "nasıl", 
-                     "nedir", "midir", "hangi", "kaç", "ne kadar", "kim", "kime", "nerede", "ne zaman"}
+                     "nedir", "midir", "hangi", "kaç", "ne kadar", "kim", "kime", "nerede", "ne zaman",
+                     "da", "de", "ki", "ya", "ise", "ama", "fakat", "lakin", "ancak", "yani", "çünkü",
+                     "zira", "eğer", "ise", "şayet", "gibi", "kadar", "öyle", "böyle", "şöyle", "göre"}
         
-        # Soru kelimelerini çıkar
-        words = []
-        for word in question.lower().split():
-            # Kelimeyi temizle (noktalama işaretlerini kaldır)
-            word = ''.join(c for c in word if c.isalnum())
-            if len(word) > 2 and word not in stop_words:
-                words.append(word)
+        # Sorunun anlamlı kelimelerini çıkar
+        def extract_keywords(text):
+            # Noktalama işaretlerini kaldır
+            text = re.sub(r'[^\w\s]', ' ', text.lower())
+            words = text.split()
+            # Stop kelimeleri ve 2 harften kısa kelimeleri çıkar
+            return [w for w in words if w not in stop_words and len(w) > 2]
         
-        # Daha sofistike bir puanlama algoritması
-        scored_sections = []
-        for section in sections:
-            section_lower = section.lower()
-            
-            # Basit TF-IDF benzeri puanlama
+        question_keywords = extract_keywords(question)
+        print(f"Soru anahtar kelimeleri: {question_keywords}")
+        
+        # Dokümanı paragraf ve cümlelere böl
+        paragraphs = [p.strip() for p in document.split('\n\n') if p.strip()]
+        
+        # Paragrafları puanla
+        scored_paragraphs = []
+        for para in paragraphs:
+            # Skoru sıfırla
             score = 0
-            exact_match = False
+            para_keywords = extract_keywords(para)
             
-            # Tam eşleşme için bonus
-            if question.lower() in section_lower:
-                exact_match = True
+            # Tam soru eşleşmesi kontrolü
+            if question.lower() in para.lower():
                 score += 100
             
-            # Her kelime için puan
-            for word in words:
-                if word in section_lower:
-                    # Kelime frekansına göre puan
-                    word_count = section_lower.count(word)
-                    score += word_count * 10
+            # Anahtar kelime eşleşmesi
+            for keyword in question_keywords:
+                if keyword in para_keywords:
+                    # Her bir eşleşen anahtar kelime için puan
+                    keyword_freq = para_keywords.count(keyword)
+                    score += keyword_freq * 5
                     
-                    # Kelimeler birbirine yakınsa bonus puan
-                    if len(words) > 1:
-                        for other_word in words:
-                            if other_word != word and other_word in section_lower:
-                                # İki kelimenin yakınlığını kontrol et
-                                if abs(section_lower.find(word) - section_lower.find(other_word)) < 100:
-                                    score += 5
+                    # Yakın anahtar kelimeler için bonus
+                    for other_kw in question_keywords:
+                        if other_kw != keyword and other_kw in para_keywords:
+                            # İki kelimenin paragraftaki yakınlığı
+                            para_lower = para.lower()
+                            if (abs(para_lower.find(keyword) - para_lower.find(other_kw)) < 100):
+                                score += 3
             
-            # Bölüm uzunluğunu normalize et
-            score = score / (len(section.split()) + 1)
+            # Sorudaki anahtar kelimelerden kaç tanesinin paragrafta bulunduğu
+            unique_matches = len(set(question_keywords) & set(para_keywords))
+            match_ratio = unique_matches / len(question_keywords) if question_keywords else 0
+            score += match_ratio * 50
             
-            # Skorla birlikte bölümü sakla
+            # Paragraf uzunluğunu normalize et (çok uzun veya çok kısa paragrafları cezalandır)
+            words_count = len(para.split())
+            if words_count < 10:  # Çok kısa
+                score *= 0.5
+            elif words_count > 300:  # Çok uzun
+                score *= 0.7
+            else:  # Orta uzunluk (ideal)
+                score *= 1.2
+                
             if score > 0:
-                scored_sections.append((score, exact_match, section))
+                scored_paragraphs.append((score, para))
         
-        # Skorlarına göre sırala (önce tam eşleşme, sonra puan)
-        scored_sections.sort(key=lambda x: (not x[1], -x[0]))
+        # Skor bazında sırala (en yüksek skordan en düşüğe)
+        scored_paragraphs.sort(key=lambda x: -x[0])
         
-        if scored_sections:
-            # En alakalı 3 bölümü al, ama bunlar birbirine çok benziyorsa sadece 1-2 tane al
-            top_sections = []
-            for _, _, section in scored_sections[:3]:
-                similar_to_existing = False
-                for existing in top_sections:
-                    if similarity_ratio(section, existing) > 0.7:  # %70 benzerlik eşiği
-                        similar_to_existing = True
+        # Bağlam için en iyi paragrafları seç
+        best_paragraphs = []
+        if scored_paragraphs:
+            # En yüksek puanlı paragrafı al
+            best_paragraphs.append(scored_paragraphs[0][1])
+            
+            # İkinci en iyi paragrafı al, ama birinciye çok benzer değilse
+            if len(scored_paragraphs) > 1:
+                similarity = improved_similarity(scored_paragraphs[0][1], scored_paragraphs[1][1])
+                if similarity < 0.6:  # %60'tan az benzerlik varsa farklı bilgi içeriyor olabilir
+                    best_paragraphs.append(scored_paragraphs[1][1])
+            
+            # Eğer ilk iki paragraf bağlam için yetersizse, üçüncüye bak
+            if len(scored_paragraphs) > 2 and len(best_paragraphs) < 2:
+                similarity1 = improved_similarity(scored_paragraphs[0][1], scored_paragraphs[2][1])
+                similarity2 = improved_similarity(scored_paragraphs[1][1], scored_paragraphs[2][1]) if len(best_paragraphs) > 1 else 1
+                
+                if similarity1 < 0.6 and similarity2 < 0.6:
+                    best_paragraphs.append(scored_paragraphs[2][1])
+            
+            # Paragraflar içinde en alakalı cümleleri bulmaya çalış
+            if len(best_paragraphs) == 1 and len(best_paragraphs[0].split()) > 100:
+                # Paragrafı cümlelere ayır
+                sentences = split_into_sentences(best_paragraphs[0])
+                
+                # Cümleleri puanla
+                scored_sentences = []
+                for sentence in sentences:
+                    score = 0
+                    sentence_keywords = extract_keywords(sentence)
+                    
+                    # Anahtar kelime eşleşmesi
+                    for keyword in question_keywords:
+                        if keyword in sentence_keywords:
+                            score += 10
+                    
+                    # Sorudaki kelimelerden kaç tanesinin cümlede bulunduğu
+                    unique_matches = len(set(question_keywords) & set(sentence_keywords))
+                    match_ratio = unique_matches / len(question_keywords) if question_keywords else 0
+                    score += match_ratio * 40
+                    
+                    if score > 0:
+                        scored_sentences.append((score, sentence))
+                
+                # Skorlarına göre sırala
+                scored_sentences.sort(key=lambda x: -x[0])
+                
+                # En alakalı cümleleri seç (en fazla 3)
+                relevant_sentences = [s[1] for s in scored_sentences[:3]]
+                
+                # Cümleler arası bağlamı korumak için orijinal sıralamada birleştir
+                if relevant_sentences:
+                    original_order = []
+                    for sentence in sentences:
+                        if sentence in relevant_sentences:
+                            original_order.append(sentence)
+                    
+                    # Cümleleri birleştir
+                    best_paragraphs[0] = " ".join(original_order)
+            
+            # Sonucu birleştir
+            result = "\n\n".join(best_paragraphs)
+            
+            # Sonuç çok uzunsa kısalt, ama anlamı korumaya çalış
+            if len(result) > 1000:
+                # Paragrafları koru ama uzunluğu sınırla
+                paragraphs = result.split('\n\n')
+                shortened_result = []
+                remaining_chars = 997  # 3 karakter "..." için ayrılacak
+                
+                for p in paragraphs:
+                    if len(p) <= remaining_chars:
+                        shortened_result.append(p)
+                        remaining_chars -= len(p)
+                        # Paragraf ayırıcısı için karakter sayısını düş
+                        if remaining_chars > 2:
+                            remaining_chars -= 2
+                        else:
+                            break
+                    else:
+                        # Paragrafı cümlelere böl ve sığacak kadar cümle ekle
+                        sentences = split_into_sentences(p)
+                        paragraph_parts = []
+                        
+                        for s in sentences:
+                            s_len = len(s) + 1  # Boşluk için 1 ekle
+                            if s_len <= remaining_chars:
+                                paragraph_parts.append(s)
+                                remaining_chars -= s_len
+                            else:
+                                break
+                        
+                        if paragraph_parts:
+                            shortened_result.append(" ".join(paragraph_parts))
                         break
                 
-                if not similar_to_existing:
-                    top_sections.append(section)
-                
-                # En fazla 2 bölüm al
-                if len(top_sections) >= 2:
-                    break
+                result = "\n\n".join(shortened_result) + "..."
             
-            result = "\n\n".join(top_sections)
-            
-            # Yanıt çok uzunsa, ilk 1000 karakterle sınırla
-            if len(result) > 1000:
-                result = result[:997] + "..."
-                
             return result
         else:
             return "Üzgünüm, izahnamede bu soruya yanıt bulunamadı."
     except FileNotFoundError:
         return f"Doküman bulunamadı: {doc_name}"
     except Exception as e:
+        error_detail = traceback.format_exc()
+        print(f"QA hatası: {str(e)}\n{error_detail}")
         return f"QA hatası: {str(e)}"
 
 @app.get("/")
