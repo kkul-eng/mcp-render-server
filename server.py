@@ -153,7 +153,7 @@ def soru_turu_belirle(soru):
         soru_tipi = "mekan"
     elif any(kw in soru_lower for kw in ["kim", "kime", "kimin", "kimdir", "kişi", "kimler"]):
         soru_tipi = "kişi"
-    elif any(kw in solu_lower for kw in ["neden", "niçin", "niye", "sebebi", "nedeni"]):
+    elif any(kw in soru_lower for kw in ["neden", "niçin", "niye", "sebebi", "nedeni"]):
         soru_tipi = "neden"
     elif any(kw in soru_lower for kw in ["nasıl", "ne şekilde", "hangi yöntemle", "yöntemi", "yöntem"]):
         soru_tipi = "yöntem"
